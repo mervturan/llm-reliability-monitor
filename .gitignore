@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Environment/secrets
+.env
+.env.*
+*.key
+*.pem
+secrets.*
+config.local.*
+
+# VS Code
+.vscode/
+!.vscode/settings.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs/cache
+*.log
+logs/
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data/model outputs
+data/
+datasets/
+outputs/
+runs/
+checkpoints/
+models/
+*.pt
+*.pth
+*.onnx
+*.pkl
+*.joblib
+
+# OS
+.DS_Store
+Thumbs.db
