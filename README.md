@@ -3,9 +3,6 @@ MSc thesis project at The University of Manchester exploring conformal predictio
 
 
 # Instructions to Run the RAG Monitoring Starter
-
-A reproducible starting point for the MSc thesis experiments on uncertainty-aware monitoring and escalation in retrieval-augmented question answering.
-
 ## First run
 
 ```bash
@@ -28,6 +25,3 @@ The run saves its full configuration, environment, row-level predictions, thresh
 - exact match and token F1
 - an interpretable empirical-risk threshold baseline
 - accept, flag, and escalate decisions
-
-The threshold baseline is deliberately simple. It gives you a functioning experimental pipeline before replacing it with CTD, split conformal prediction, or conformal risk control.
-

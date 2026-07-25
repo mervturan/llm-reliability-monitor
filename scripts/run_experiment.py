@@ -31,6 +31,25 @@ from rag_monitoring.reproducibility import environment_info, set_seed
 from rag_monitoring.retrieval import DenseRetriever
 
 
+def normalize_context(text: str) -> str:
+    """Normalize whitespace/casing for exact context matching."""
+    return " ".join(text.split()).strip().lower()
+
+
+def find_gold_context_rank(
+    gold_context: str,
+    retrieved_contexts: list[str],
+) -> int | None:
+    """Return the 1-based rank of the gold context, or None if absent."""
+    normalized_gold = normalize_context(gold_context)
+
+    for rank, context in enumerate(retrieved_contexts, start=1):
+        if normalize_context(context) == normalized_gold:
+            return rank
+
+    return None
+
+
 def evaluate_examples(
     examples: list[dict],
     retriever: DenseRetriever,
@@ -57,8 +76,8 @@ def evaluate_examples(
         for sample_index in range(sample_count):
             temperature = generation_config["temperature"]
 
-            # Keep the first output deterministic. If consistency sampling is
-            # enabled, use sampling for the additional outputs.
+            # First generation is deterministic. Additional generations use
+            # sampling only when consistency estimation is requested.
             if sample_index > 0 and temperature == 0:
                 temperature = 0.7
 
@@ -74,6 +93,17 @@ def evaluate_examples(
 
         raw_prediction = raw_answers[0]
         prediction = cleaned_answers[0]
+
+        gold_context_rank = find_gold_context_rank(
+            example["context"],
+            retrieval_result.contexts,
+        )
+        gold_context_retrieved = gold_context_rank is not None
+        reciprocal_rank = (
+            1.0 / gold_context_rank
+            if gold_context_rank is not None
+            else 0.0
+        )
 
         joined_context = "\n".join(retrieval_result.contexts)
 
@@ -104,9 +134,11 @@ def evaluate_examples(
                 "cleaned_prediction": prediction,
                 "all_raw_predictions": raw_answers,
                 "all_cleaned_predictions": cleaned_answers,
-                # Kept for compatibility with existing analysis code.
                 "prediction": prediction,
                 "references": references,
+                "gold_context_retrieved": gold_context_retrieved,
+                "gold_context_rank": gold_context_rank,
+                "reciprocal_rank": reciprocal_rank,
                 "retrieved_contexts": retrieval_result.contexts,
                 "retrieval_scores": retrieval_result.scores,
                 "retrieval_top_score": retrieval_result.scores[0],
@@ -130,6 +162,26 @@ def aggregate_metrics(rows: list[dict]) -> dict:
         if row.get("decision") == "accept"
     ]
 
+    retrieved = [
+        row for row in rows
+        if row["gold_context_retrieved"]
+    ]
+
+    correct_when_retrieved = [
+        row["exact_match"]
+        for row in retrieved
+    ]
+
+    not_retrieved = [
+        row for row in rows
+        if not row["gold_context_retrieved"]
+    ]
+
+    correct_when_not_retrieved = [
+        row["exact_match"]
+        for row in not_retrieved
+    ]
+
     return {
         "n_examples": len(rows),
         "exact_match": float(
@@ -141,15 +193,51 @@ def aggregate_metrics(rows: list[dict]) -> dict:
         "mean_confidence": float(
             np.mean([row["combined_confidence"] for row in rows])
         ),
+        "retrieval": {
+            "top_k": max(
+                len(row["retrieved_contexts"])
+                for row in rows
+            ),
+            "recall_at_k": len(retrieved) / len(rows),
+            "mean_reciprocal_rank": float(
+                np.mean([row["reciprocal_rank"] for row in rows])
+            ),
+            "mean_gold_rank_when_retrieved": (
+                float(np.mean([
+                    row["gold_context_rank"]
+                    for row in retrieved
+                ]))
+                if retrieved
+                else None
+            ),
+        },
+        "generation_given_retrieval": {
+            "exact_match_when_gold_retrieved": (
+                float(np.mean(correct_when_retrieved))
+                if correct_when_retrieved
+                else None
+            ),
+            "exact_match_when_gold_not_retrieved": (
+                float(np.mean(correct_when_not_retrieved))
+                if correct_when_not_retrieved
+                else None
+            ),
+        },
         "acceptance_rate": len(accepted) / len(rows),
         "selective_exact_match": (
-            float(np.mean([row["exact_match"] for row in accepted]))
+            float(np.mean([
+                row["exact_match"]
+                for row in accepted
+            ]))
             if accepted
             else None
         ),
         "selective_risk": (
             1.0
-            - float(np.mean([row["exact_match"] for row in accepted]))
+            - float(np.mean([
+                row["exact_match"]
+                for row in accepted
+            ]))
             if accepted
             else None
         ),
@@ -161,6 +249,28 @@ def aggregate_metrics(rows: list[dict]) -> dict:
             for label in ["accept", "flag", "escalate"]
         },
     }
+
+
+def thresholds_to_dict(thresholds) -> dict:
+    """Support both the old and expanded Thresholds dataclasses."""
+    if hasattr(thresholds, "to_dict"):
+        return thresholds.to_dict()
+
+    payload = {
+        "accept": thresholds.accept,
+        "flag": thresholds.flag,
+    }
+
+    for field in [
+        "target_risk",
+        "target_achieved",
+        "accepted_count_at_threshold",
+        "empirical_risk_at_threshold",
+    ]:
+        if hasattr(thresholds, field):
+            payload[field] = getattr(thresholds, field)
+
+    return payload
 
 
 def main() -> None:
@@ -238,9 +348,12 @@ def main() -> None:
             thresholds,
         )
 
+    threshold_payload = thresholds_to_dict(thresholds)
+
     metrics = {
         "calibration": aggregate_metrics(calibration_rows),
         "test": aggregate_metrics(test_rows),
+        "calibration_status": threshold_payload,
     }
 
     save_jsonl(
@@ -253,10 +366,7 @@ def main() -> None:
     )
     save_json(
         run_dir / "thresholds.json",
-        {
-            "accept": thresholds.accept,
-            "flag": thresholds.flag,
-        },
+        threshold_payload,
     )
     save_json(
         run_dir / "metrics.json",
