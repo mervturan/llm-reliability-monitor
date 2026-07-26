@@ -23,16 +23,14 @@ from rag_monitoring.io_utils import (
 from rag_monitoring.metrics import exact_match, token_f1
 from rag_monitoring.monitoring import (
     calibrate_thresholds,
-    combined_confidence,
-    consistency_score,
     decision,
+    monitor_answer,
 )
 from rag_monitoring.reproducibility import environment_info, set_seed
 from rag_monitoring.retrieval import DenseRetriever
 
 
 def normalize_context(text: str) -> str:
-    """Normalize whitespace/casing for exact context matching."""
     return " ".join(text.split()).strip().lower()
 
 
@@ -40,7 +38,6 @@ def find_gold_context_rank(
     gold_context: str,
     retrieved_contexts: list[str],
 ) -> int | None:
-    """Return the 1-based rank of the gold context, or None if absent."""
     normalized_gold = normalize_context(gold_context)
 
     for rank, context in enumerate(retrieved_contexts, start=1):
@@ -76,8 +73,8 @@ def evaluate_examples(
         for sample_index in range(sample_count):
             temperature = generation_config["temperature"]
 
-            # First generation is deterministic. Additional generations use
-            # sampling only when consistency estimation is requested.
+            # Keep the first answer deterministic.
+            # Additional generations use sampling for consistency estimation.
             if sample_index > 0 and temperature == 0:
                 temperature = 0.7
 
@@ -98,31 +95,26 @@ def evaluate_examples(
             example["context"],
             retrieval_result.contexts,
         )
+
         gold_context_retrieved = gold_context_rank is not None
+
         reciprocal_rank = (
             1.0 / gold_context_rank
             if gold_context_rank is not None
             else 0.0
         )
 
-        joined_context = "\n".join(retrieval_result.contexts)
-
-        faithfulness = retriever.semantic_similarity(
-            prediction,
-            joined_context,
-        )
-
-        consistency = consistency_score(
-            cleaned_answers,
-            retriever.semantic_similarity,
-        )
-
-        confidence = combined_confidence(
-            retrieval_score=retrieval_result.scores[0],
-            faithfulness_score=faithfulness,
-            consistency=consistency,
+        monitoring_result = monitor_answer(
+            prediction=prediction,
+            retrieved_contexts=retrieval_result.contexts,
+            retrieval_scores=retrieval_result.scores,
+            all_predictions=cleaned_answers,
+            similarity_function=retriever.semantic_similarity,
             weights=monitoring_config["score_weights"],
         )
+
+        signal_scores = monitoring_result.signal_scores()
+        raw_signal_values = monitoring_result.raw_signal_values()
 
         references = example["answers"]["text"]
 
@@ -130,28 +122,50 @@ def evaluate_examples(
             {
                 "id": example["id"],
                 "question": example["question"],
+
                 "raw_prediction": raw_prediction,
                 "cleaned_prediction": prediction,
                 "all_raw_predictions": raw_answers,
                 "all_cleaned_predictions": cleaned_answers,
+
+                # Kept for compatibility with older analysis code.
                 "prediction": prediction,
+
                 "references": references,
+
                 "gold_context_retrieved": gold_context_retrieved,
                 "gold_context_rank": gold_context_rank,
                 "reciprocal_rank": reciprocal_rank,
+
                 "retrieved_contexts": retrieval_result.contexts,
                 "retrieval_scores": retrieval_result.scores,
                 "retrieval_top_score": retrieval_result.scores[0],
-                "faithfulness_score": faithfulness,
-                "consistency_score": consistency,
-                "combined_confidence": confidence,
-                "exact_match": exact_match(prediction, references),
-                "token_f1": token_f1(prediction, references),
+
+                "retrieval_signal": signal_scores["retrieval"],
+                "faithfulness_signal": signal_scores["faithfulness"],
+                "consistency_signal": signal_scores["consistency"],
+
+                "retrieval_signal_raw": raw_signal_values["retrieval"],
+                "faithfulness_signal_raw": raw_signal_values["faithfulness"],
+                "consistency_signal_raw": raw_signal_values["consistency"],
+
+                "combined_confidence": (
+                    monitoring_result.combined_confidence
+                ),
+
+                "exact_match": exact_match(
+                    prediction,
+                    references,
+                ),
+
+                "token_f1": token_f1(
+                    prediction,
+                    references,
+                ),
             }
         )
 
     return rows
-
 
 def aggregate_metrics(rows: list[dict]) -> dict:
     if not rows:

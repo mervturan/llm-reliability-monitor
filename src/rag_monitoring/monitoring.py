@@ -1,11 +1,57 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+
 import numpy as np
+
+from rag_monitoring.signals import (
+    SignalResult,
+    combine_signals,
+    consistency_signal,
+    faithfulness_signal,
+    retrieval_signal,
+)
+
+
+@dataclass
+class MonitoringResult:
+    """
+    Monitoring output for one generated answer.
+    """
+
+    signals: list[SignalResult]
+    combined_confidence: float
+
+    def signal_scores(self) -> dict[str, float | None]:
+        """
+        Return signal scores in a CSV/JSON-friendly form.
+        """
+        output: dict[str, float | None] = {}
+
+        for signal in self.signals:
+            if np.isnan(signal.score):
+                output[signal.name] = None
+            else:
+                output[signal.name] = float(signal.score)
+
+        return output
+
+    def raw_signal_values(self) -> dict[str, float | None]:
+        """
+        Return raw, pre-normalisation values for reproducibility.
+        """
+        return {
+            signal.name: signal.raw_value
+            for signal in self.signals
+        }
 
 
 @dataclass
 class Thresholds:
+    """
+    Thresholds learned from the calibration split.
+    """
+
     accept: float
     flag: float
     target_risk: float
@@ -17,87 +63,146 @@ class Thresholds:
         return asdict(self)
 
 
-def minmax_cosine(score: float) -> float:
-    return float(np.clip((score + 1.0) / 2.0, 0.0, 1.0))
-
-
-def consistency_score(answers: list[str], similarity_function) -> float | None:
-    if len(answers) <= 1:
-        return None
-
-    similarities = []
-    for left in range(len(answers)):
-        for right in range(left + 1, len(answers)):
-            similarities.append(
-                minmax_cosine(similarity_function(answers[left], answers[right]))
-            )
-    return float(np.mean(similarities)) if similarities else None
-
-
-def combined_confidence(
-    retrieval_score: float,
-    faithfulness_score: float,
-    consistency: float | None,
+def monitor_answer(
+    prediction: str,
+    retrieved_contexts: list[str],
+    retrieval_scores: list[float],
+    all_predictions: list[str],
+    similarity_function,
     weights: dict[str, float],
-) -> float:
-    components = {
-        "retrieval": minmax_cosine(retrieval_score),
-        "faithfulness": minmax_cosine(faithfulness_score),
-    }
-    active_weights = {
-        "retrieval": float(weights.get("retrieval", 0.0)),
-        "faithfulness": float(weights.get("faithfulness", 0.0)),
-    }
+) -> MonitoringResult:
+    """
+    Calculate all enabled monitoring signals for one answer.
 
-    if consistency is not None and float(weights.get("consistency", 0.0)) > 0:
-        components["consistency"] = float(np.clip(consistency, 0.0, 1.0))
-        active_weights["consistency"] = float(weights["consistency"])
+    Signal availability is controlled through the supplied weights.
+    Signals with a weight of zero do not contribute to the final score.
+    """
 
-    total_weight = sum(active_weights.values())
-    if total_weight <= 0:
-        raise ValueError("Active monitoring score weights must sum to a positive value.")
+    joined_context = "\n".join(retrieved_contexts)
 
-    return sum(active_weights[name] * components[name] for name in active_weights) / total_weight
+    signals = [
+        retrieval_signal(
+            retrieval_scores=retrieval_scores,
+        ),
+        faithfulness_signal(
+            answer=prediction,
+            context=joined_context,
+            similarity_function=similarity_function,
+        ),
+        consistency_signal(
+            answers=all_predictions,
+            similarity_function=similarity_function,
+        ),
+    ]
+
+    confidence = combine_signals(
+        signals=signals,
+        weights=weights,
+    )
+
+    return MonitoringResult(
+        signals=signals,
+        combined_confidence=float(confidence),
+    )
 
 
 def calibrate_thresholds(
     rows: list[dict],
     target_risk: float,
     flag_margin: float,
+    correctness_field: str = "exact_match",
 ) -> Thresholds:
-    if not rows:
-        raise ValueError("Calibration requires at least one row.")
+    """
+    Select the lowest confidence threshold whose accepted calibration
+    examples satisfy the requested empirical risk.
 
-    candidates = sorted({float(row["combined_confidence"]) for row in rows})
+    This is currently an empirical thresholding baseline. It is not yet
+    a formal conformal guarantee.
+    """
+
+    if not rows:
+        raise ValueError(
+            "Threshold calibration requires at least one calibration example."
+        )
+
+    if not 0.0 <= target_risk <= 1.0:
+        raise ValueError(
+            "target_risk must be between 0 and 1."
+        )
+
+    candidates = sorted(
+        {
+            float(row["combined_confidence"])
+            for row in rows
+        }
+    )
 
     for threshold in candidates:
-        accepted = [row for row in rows if row["combined_confidence"] >= threshold]
-        empirical_risk = 1.0 - float(np.mean([row["exact_match"] for row in accepted]))
+        accepted = [
+            row
+            for row in rows
+            if float(row["combined_confidence"]) >= threshold
+        ]
+
+        if not accepted:
+            continue
+
+        accepted_accuracy = float(
+            np.mean([
+                float(row[correctness_field])
+                for row in accepted
+            ])
+        )
+
+        empirical_risk = 1.0 - accepted_accuracy
 
         if empirical_risk <= target_risk:
             return Thresholds(
-                accept=threshold,
-                flag=max(0.0, threshold - flag_margin),
-                target_risk=target_risk,
+                accept=float(threshold),
+                flag=max(
+                    0.0,
+                    float(threshold) - float(flag_margin),
+                ),
+                target_risk=float(target_risk),
                 target_achieved=True,
                 accepted_count_at_threshold=len(accepted),
-                empirical_risk_at_threshold=empirical_risk,
+                empirical_risk_at_threshold=float(empirical_risk),
             )
 
     maximum_confidence = max(candidates)
+
+    # Put the accept threshold immediately above every observed
+    # calibration confidence so that no answer is falsely reported
+    # as satisfying the requested risk.
+    unavailable_accept_threshold = float(
+        np.nextafter(maximum_confidence, np.inf)
+    )
+
     return Thresholds(
-        accept=float(np.nextafter(maximum_confidence, np.inf)),
-        flag=max(0.0, maximum_confidence - flag_margin),
-        target_risk=target_risk,
+        accept=unavailable_accept_threshold,
+        flag=max(
+            0.0,
+            float(maximum_confidence) - float(flag_margin),
+        ),
+        target_risk=float(target_risk),
         target_achieved=False,
         accepted_count_at_threshold=0,
         empirical_risk_at_threshold=None,
     )
 
 
-def decision(confidence: float, thresholds: Thresholds) -> str:
+def decision(
+    confidence: float,
+    thresholds: Thresholds,
+) -> str:
+    """
+    Convert a confidence value into a monitoring decision.
+    """
+
     if confidence >= thresholds.accept:
         return "accept"
+
     if confidence >= thresholds.flag:
         return "flag"
+
     return "escalate"
