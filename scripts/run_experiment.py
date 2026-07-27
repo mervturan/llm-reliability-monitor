@@ -41,16 +41,113 @@ def find_gold_context_rank(
             return rank
     return None
 
+def apply_cascade(
+    rows: list[dict],
+    examples: list[dict],
+    large_generator: AnswerGenerator,
+    large_generation_config: dict,
+    thresholds,
+) -> list[dict]:
+    """
+    Apply the calibrated decision rule and run the large model
+    only for examples marked for escalation.
+    """
+
+    if len(rows) != len(examples):
+        raise ValueError(
+            "Rows and examples must contain the same number of items."
+        )
+
+    for row, example in tqdm(
+        zip(rows, examples),
+        total=len(rows),
+        desc="Applying cascade",
+    ):
+        monitoring_decision = decision(
+            row["combined_confidence"],
+            thresholds,
+        )
+
+        row["decision"] = monitoring_decision
+
+        small_prediction = row["cleaned_prediction"]
+        references = row["references"]
+
+        row["small_prediction"] = small_prediction
+        row["small_exact_match"] = exact_match(
+            small_prediction,
+            references,
+        )
+        row["small_token_f1"] = token_f1(
+            small_prediction,
+            references,
+        )
+
+        # Default: keep the small-model answer.
+        row["escalated"] = False
+        row["large_raw_prediction"] = None
+        row["large_prediction"] = None
+        row["large_exact_match"] = None
+        row["large_token_f1"] = None
+        row["final_prediction"] = small_prediction
+
+        if monitoring_decision == "escalate":
+            large_raw, large_cleaned = large_generator.generate(
+                question=example["question"],
+                contexts=row["retrieved_contexts"],
+                max_new_tokens=large_generation_config["max_new_tokens"],
+                temperature=large_generation_config["temperature"],
+            )
+
+            row["escalated"] = True
+            row["large_raw_prediction"] = large_raw
+            row["large_prediction"] = large_cleaned
+
+            row["large_exact_match"] = exact_match(
+                large_cleaned,
+                references,
+            )
+            row["large_token_f1"] = token_f1(
+                large_cleaned,
+                references,
+            )
+
+            row["final_prediction"] = large_cleaned
+
+        row["final_exact_match"] = exact_match(
+            row["final_prediction"],
+            references,
+        )
+        row["final_token_f1"] = token_f1(
+            row["final_prediction"],
+            references,
+        )
+
+        row["escalation_improved"] = (
+            row["escalated"]
+            and row["small_exact_match"] == 0
+            and row["final_exact_match"] == 1
+        )
+
+        row["escalation_harmed"] = (
+            row["escalated"]
+            and row["small_exact_match"] == 1
+            and row["final_exact_match"] == 0
+        )
+
+    return rows
+
 
 def evaluate_examples(
     examples: list[dict],
     retriever: DenseRetriever,
-    generator: AnswerGenerator,
+    small_generator: AnswerGenerator,
     config: dict,
 ) -> list[dict]:
     rows: list[dict] = []
+
     retrieval_config = config["retrieval"]
-    generation_config = config["generation"]["small_model"]
+    small_generation_config = config["generation"]["small_model"]
     monitoring_config = config["monitoring"]
 
     for example in tqdm(examples, desc="Evaluating"):
@@ -62,15 +159,15 @@ def evaluate_examples(
         raw_answers: list[str] = []
         cleaned_answers: list[str] = []
 
-        for sample_index in range(generation_config["num_consistency_samples"]):
-            temperature = generation_config["temperature"]
+        for sample_index in range(small_generation_config["num_consistency_samples"]):
+            temperature = small_generation_config["temperature"]
             if sample_index > 0 and temperature == 0:
                 temperature = 0.7
 
-            raw_answer, cleaned_answer = generator.generate(
+            raw_answer, cleaned_answer = small_generator.generate(
                 question=example["question"],
                 contexts=retrieval_result.contexts,
-                max_new_tokens=generation_config["max_new_tokens"],
+                max_new_tokens=small_generation_config["max_new_tokens"],
                 temperature=temperature,
             )
             raw_answers.append(raw_answer)
@@ -132,6 +229,23 @@ def aggregate_metrics(rows: list[dict]) -> dict:
     retrieved = [row for row in rows if row["gold_context_retrieved"]]
     not_retrieved = [row for row in rows if not row["gold_context_retrieved"]]
 
+    escalated = [
+    row for row in rows
+    if row.get("escalated", False)
+    ]
+
+    improved = [
+        row for row in escalated
+        if row["small_exact_match"] == 0
+        and row["final_exact_match"] == 1
+    ]
+
+    harmed = [
+        row for row in escalated
+        if row["small_exact_match"] == 1
+        and row["final_exact_match"] == 0
+    ]
+
     return {
         "n_examples": len(rows),
         "exact_match": float(np.mean([row["exact_match"] for row in rows])),
@@ -168,6 +282,39 @@ def aggregate_metrics(rows: list[dict]) -> dict:
         "decision_counts": {
             label: sum(row.get("decision") == label for row in rows)
             for label in ["accept", "flag", "escalate"]
+        },
+        "cascade": {
+        "escalation_rate": len(escalated) / len(rows),
+        "small_exact_match": float(
+            np.mean([row["small_exact_match"] for row in rows])
+        ),
+        "small_token_f1": float(
+            np.mean([row["small_token_f1"] for row in rows])
+        ),
+        "large_exact_match_on_escalated": (
+            float(np.mean([
+                row["large_exact_match"]
+                for row in escalated
+            ]))
+            if escalated
+            else None
+        ),
+        "large_token_f1_on_escalated": (
+            float(np.mean([
+                row["large_token_f1"]
+                for row in escalated
+            ]))
+            if escalated
+            else None
+        ),
+        "final_exact_match": float(
+            np.mean([row["final_exact_match"] for row in rows])
+        ),
+        "final_token_f1": float(
+            np.mean([row["final_token_f1"] for row in rows])
+        ),
+        "improved_count": len(improved),
+        "harmed_count": len(harmed),
         },
     }
 
@@ -219,27 +366,45 @@ def main() -> None:
         config,
     )
 
-
+    # Learn the thresholds from the small-model calibration results.
     thresholds = calibrate_thresholds(
         calibration_rows,
         target_risk=config["monitoring"]["target_risk"],
         flag_margin=config["monitoring"]["flag_margin"],
     )
-    for row in calibration_rows:
-        row["decision"] = decision(row["combined_confidence"], thresholds)
 
-    test_rows = evaluate_examples(
-    test_examples,
-    retriever,
-    small_generator,
-    config,
+    # Apply decisions and call the large model for escalated calibration examples.
+    calibration_rows = apply_cascade(
+        rows=calibration_rows,
+        examples=calibration_examples,
+        large_generator=large_generator,
+        large_generation_config=large_model_config,
+        thresholds=thresholds,
     )
 
-    for row in test_rows:
-        row["decision"] = decision(row["combined_confidence"], thresholds)
+    test_rows = evaluate_examples(
+        test_examples,
+        retriever,
+        small_generator,
+        config,
+    )
+
+    # Use the calibration thresholds on the unseen test examples.
+    test_rows = apply_cascade(
+        rows=test_rows,
+        examples=test_examples,
+        large_generator=large_generator,
+        large_generation_config=large_model_config,
+        thresholds=thresholds,
+    )
 
     threshold_payload = thresholds.to_dict()
+
     metrics = {
+        "model_configuration": {
+            "small_model": small_model_config["model_name"],
+            "large_model": large_model_config["model_name"],
+        },
         "signal_configuration": {
             "enabled_signals": config["monitoring"]["enabled_signals"],
             "score_weights": config["monitoring"]["score_weights"],
@@ -249,22 +414,39 @@ def main() -> None:
         "calibration_status": threshold_payload,
     }
 
-    save_jsonl(run_dir / "calibration_predictions.jsonl", calibration_rows)
-    save_jsonl(run_dir / "test_predictions.jsonl", test_rows)
-    save_json(run_dir / "thresholds.json", threshold_payload)
-    save_json(run_dir / "metrics.json", metrics)
-    save_summary_csv(run_dir / "summary.csv", calibration_rows, test_rows)
+    save_jsonl(
+        run_dir / "calibration_predictions.jsonl",
+        calibration_rows,
+    )
+    save_jsonl(
+        run_dir / "test_predictions.jsonl",
+        test_rows,
+    )
+    save_json(
+        run_dir / "thresholds.json",
+        threshold_payload,
+    )
+    save_json(
+        run_dir / "metrics.json",
+        metrics,
+    )
+    save_summary_csv(
+        run_dir / "summary.csv",
+        calibration_rows,
+        test_rows,
+    )
 
     build_risk_coverage_table(calibration_rows).to_csv(
-        run_dir / "risk_coverage_calibration.csv", index=False
+        run_dir / "risk_coverage_calibration.csv",
+        index=False,
     )
     build_risk_coverage_table(test_rows).to_csv(
-        run_dir / "risk_coverage_test.csv", index=False
+        run_dir / "risk_coverage_test.csv",
+        index=False,
     )
 
     print(f"\nRun completed: {run_dir}")
     print(metrics)
-
 
 if __name__ == "__main__":
     main()
