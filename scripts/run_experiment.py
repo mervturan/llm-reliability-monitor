@@ -50,7 +50,7 @@ def evaluate_examples(
 ) -> list[dict]:
     rows: list[dict] = []
     retrieval_config = config["retrieval"]
-    generation_config = config["generation"]
+    generation_config = config["generation"]["small_model"]
     monitoring_config = config["monitoring"]
 
     for example in tqdm(examples, desc="Evaluating"):
@@ -199,12 +199,27 @@ def main() -> None:
         contexts=contexts,
         batch_size=config["retrieval"]["batch_size"],
     )
-    generator = AnswerGenerator(
-        model_name=config["generation"]["model_name"],
-        device=config["generation"]["device"],
+    small_model_config = config["generation"]["small_model"]
+    large_model_config = config["generation"]["large_model"]
+
+    small_generator = AnswerGenerator(
+        model_name=small_model_config["model_name"],
+        device=small_model_config["device"],
     )
 
-    calibration_rows = evaluate_examples(calibration_examples, retriever, generator, config)
+    large_generator = AnswerGenerator(
+        model_name=large_model_config["model_name"],
+        device=large_model_config["device"],
+    )
+
+    calibration_rows = evaluate_examples(
+        calibration_examples,
+        retriever,
+        small_generator,
+        config,
+    )
+
+
     thresholds = calibrate_thresholds(
         calibration_rows,
         target_risk=config["monitoring"]["target_risk"],
@@ -213,7 +228,13 @@ def main() -> None:
     for row in calibration_rows:
         row["decision"] = decision(row["combined_confidence"], thresholds)
 
-    test_rows = evaluate_examples(test_examples, retriever, generator, config)
+    test_rows = evaluate_examples(
+    test_examples,
+    retriever,
+    small_generator,
+    config,
+    )
+
     for row in test_rows:
         row["decision"] = decision(row["combined_confidence"], thresholds)
 
