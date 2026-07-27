@@ -16,6 +16,23 @@ On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
 
 The run saves its full configuration, environment, row-level predictions, thresholds, metrics, and a CSV summary under `outputs/<run_name>/`.
 
+## Running experiments on CSF3
+
+Submit an experiment with:
+
+```bash
+sbatch scripts/run_csf3.sh configs/baseline/combined_100.yaml
+```
+
+Monitor the job:
+
+```bash
+squeue -u $USER
+tail -f rag-<JOBID>.out
+```
+
+Outputs are written to the `outputs/` directory.
+
 ## What it currently implements
 
 - SQuAD calibration and test samples

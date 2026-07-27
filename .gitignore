@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+*.pyc
 *.py[cod]
 *.pyo
 .venv/
@@ -44,6 +45,8 @@ models/
 *.onnx
 *.pkl
 *.joblib
+*.out
+*.err
 
 # OS
 .DS_Store
