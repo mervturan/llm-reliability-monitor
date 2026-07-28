@@ -25,6 +25,7 @@ from rag_monitoring.monitoring import calibrate_thresholds, decision, monitor_an
 from rag_monitoring.reproducibility import environment_info, set_seed
 from rag_monitoring.retrieval import DenseRetriever
 from rag_monitoring.risk_coverage import build_risk_coverage_table
+from rag_monitoring.delegation import threshold_delegation
 
 
 def normalize_context(text: str) -> str:
@@ -63,12 +64,15 @@ def apply_cascade(
         total=len(rows),
         desc="Applying cascade",
     ):
-        monitoring_decision = decision(
-            row["combined_confidence"],
-            thresholds,
-        )
+        delegation_result = threshold_delegation(
+        confidence=row["combined_confidence"],
+        thresholds=thresholds,
+    )
+
+        monitoring_decision = delegation_result.decision
 
         row["decision"] = monitoring_decision
+        row["delegation_policy"] = delegation_result.policy_name
 
         small_prediction = row["cleaned_prediction"]
         references = row["references"]
@@ -91,7 +95,7 @@ def apply_cascade(
         row["large_token_f1"] = None
         row["final_prediction"] = small_prediction
 
-        if monitoring_decision == "escalate":
+        if delegation_result.should_escalate:
             large_raw, large_cleaned = large_generator.generate(
                 question=example["question"],
                 contexts=row["retrieved_contexts"],
@@ -285,10 +289,10 @@ def aggregate_metrics(rows: list[dict]) -> dict:
         },
         "cascade": {
         "escalation_rate": len(escalated) / len(rows),
-        "small_exact_match": float(
+        "small_model_exact_match": float(
             np.mean([row["small_exact_match"] for row in rows])
         ),
-        "small_token_f1": float(
+        "small_model_token_f1": float(
             np.mean([row["small_token_f1"] for row in rows])
         ),
         "large_exact_match_on_escalated": (
