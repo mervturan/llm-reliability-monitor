@@ -25,8 +25,11 @@ from rag_monitoring.monitoring import calibrate_thresholds, decision, monitor_an
 from rag_monitoring.reproducibility import environment_info, set_seed
 from rag_monitoring.retrieval import DenseRetriever
 from rag_monitoring.risk_coverage import build_risk_coverage_table
-from rag_monitoring.delegation import threshold_delegation
 
+from rag_monitoring.delegation import (
+    frugalgpt_delegation,
+    threshold_delegation,
+)
 
 def normalize_context(text: str) -> str:
     return " ".join(text.split()).strip().lower()
@@ -48,9 +51,10 @@ def apply_cascade(
     large_generator: AnswerGenerator,
     large_generation_config: dict,
     thresholds,
+    policy_name: str,
 ) -> list[dict]:
     """
-    Apply the calibrated decision rule and run the large model
+    Apply the selected delegation policy and run the large model
     only for examples marked for escalation.
     """
 
@@ -64,10 +68,22 @@ def apply_cascade(
         total=len(rows),
         desc="Applying cascade",
     ):
-        delegation_result = threshold_delegation(
-        confidence=row["combined_confidence"],
-        thresholds=thresholds,
-    )
+        if policy_name == "frugalgpt":
+            delegation_result = frugalgpt_delegation(
+                confidence=row["combined_confidence"],
+                threshold=thresholds.accept,
+            )
+
+        elif policy_name == "threshold_baseline":
+            delegation_result = threshold_delegation(
+                confidence=row["combined_confidence"],
+                thresholds=thresholds,
+            )
+
+        else:
+            raise ValueError(
+                f"Unknown delegation policy: {policy_name}"
+            )
 
         monitoring_decision = delegation_result.decision
 
@@ -384,6 +400,7 @@ def main() -> None:
         large_generator=large_generator,
         large_generation_config=large_model_config,
         thresholds=thresholds,
+        policy_name=config["delegation"]["policy"],
     )
 
     test_rows = evaluate_examples(
@@ -400,6 +417,7 @@ def main() -> None:
         large_generator=large_generator,
         large_generation_config=large_model_config,
         thresholds=thresholds,
+        policy_name=config["delegation"]["policy"],
     )
 
     threshold_payload = thresholds.to_dict()

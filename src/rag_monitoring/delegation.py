@@ -26,3 +26,15 @@ def threshold_delegation(
         should_escalate=monitoring_decision == "escalate",
         policy_name="threshold_baseline",
     )
+
+def frugalgpt_delegation(
+    confidence: float,
+    threshold: float,
+) -> DelegationResult:
+    should_escalate = confidence < threshold
+
+    return DelegationResult(
+        decision="escalate" if should_escalate else "accept",
+        should_escalate=should_escalate,
+        policy_name="frugalgpt_style",
+    )
