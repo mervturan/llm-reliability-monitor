@@ -304,38 +304,59 @@ def aggregate_metrics(rows: list[dict]) -> dict:
             for label in ["accept", "flag", "escalate"]
         },
         "cascade": {
-        "escalation_rate": len(escalated) / len(rows),
-        "small_model_exact_match": float(
-            np.mean([row["small_exact_match"] for row in rows])
-        ),
-        "small_model_token_f1": float(
-            np.mean([row["small_token_f1"] for row in rows])
-        ),
-        "large_exact_match_on_escalated": (
-            float(np.mean([
-                row["large_exact_match"]
-                for row in escalated
-            ]))
-            if escalated
-            else None
-        ),
-        "large_token_f1_on_escalated": (
-            float(np.mean([
-                row["large_token_f1"]
-                for row in escalated
-            ]))
-            if escalated
-            else None
-        ),
-        "final_exact_match": float(
-            np.mean([row["final_exact_match"] for row in rows])
-        ),
-        "final_token_f1": float(
-            np.mean([row["final_token_f1"] for row in rows])
-        ),
-        "improved_count": len(improved),
-        "harmed_count": len(harmed),
+            "escalation_rate": len(escalated) / len(rows),
+
+            "small_model_exact_match": float(
+                np.mean([row["small_exact_match"] for row in rows])
+            ),
+            "small_model_token_f1": float(
+                np.mean([row["small_token_f1"] for row in rows])
+            ),
+
+            "large_exact_match_on_escalated": (
+                float(np.mean([
+                    row["large_exact_match"]
+                    for row in escalated
+                ]))
+                if escalated
+                else None
+            ),
+
+            "large_token_f1_on_escalated": (
+                float(np.mean([
+                    row["large_token_f1"]
+                    for row in escalated
+                ]))
+                if escalated
+                else None
+            ),
+
+            "final_exact_match": float(
+                np.mean([row["final_exact_match"] for row in rows])
+            ),
+
+            "final_token_f1": float(
+                np.mean([row["final_token_f1"] for row in rows])
+            ),
+
+            "improved_count": len(improved),
+            "harmed_count": len(harmed),
+
+            # NEW
+            "net_improvement_count": len(improved) - len(harmed),
+
+            "usage": {
+                "small_model_calls": len(rows),
+                "large_model_calls": len(escalated),
+                "large_model_call_rate": len(escalated) / len(rows),
+            },
+
+            "final_em_gain_over_small": (
+                float(np.mean([row["final_exact_match"] for row in rows]))
+                - float(np.mean([row["small_exact_match"] for row in rows]))
+            ),
         },
+        
     }
 
 
