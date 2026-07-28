@@ -1,5 +1,7 @@
 run:
   name: squad_frugalgpt_qwen05_to_qwen3_100
+  seed: 42
+  output_root: outputs
 
 dataset:
   calibration_size: 100
