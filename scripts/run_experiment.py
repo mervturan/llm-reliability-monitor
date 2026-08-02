@@ -27,6 +27,9 @@ from rag_monitoring.retrieval import DenseRetriever
 from rag_monitoring.risk_coverage import build_risk_coverage_table
 
 from rag_monitoring.delegation import (
+    CTDPolicy,
+    ctd_delegation,
+    fit_ctd_policy,
     frugalgpt_delegation,
     threshold_delegation,
 )
@@ -52,10 +55,14 @@ def apply_cascade(
     large_generation_config: dict,
     thresholds,
     policy_name: str,
+    ctd_policy: CTDPolicy | None = None,
 ) -> list[dict]:
     """
-    Apply the selected delegation policy and run the large model
-    only for examples marked for escalation.
+    Apply the selected delegation policy.
+
+    The large model is called only for delegated examples, except that
+    CTD calibration rows may already contain large-model outputs generated
+    earlier for fitting the delegation-value model.
     """
 
     if len(rows) != len(examples):
@@ -68,6 +75,9 @@ def apply_cascade(
         total=len(rows),
         desc="Applying cascade",
     ):
+        # ---------------------------------------------------------
+        # Select the delegation policy
+        # ---------------------------------------------------------
         if policy_name == "frugalgpt":
             delegation_result = frugalgpt_delegation(
                 confidence=row["combined_confidence"],
@@ -80,16 +90,29 @@ def apply_cascade(
                 thresholds=thresholds,
             )
 
+        elif policy_name == "ctd":
+            if ctd_policy is None:
+                raise ValueError(
+                    "CTD policy has not been fitted."
+                )
+
+            delegation_result = ctd_delegation(
+                row=row,
+                policy=ctd_policy,
+            )
+
         else:
             raise ValueError(
                 f"Unknown delegation policy: {policy_name}"
             )
 
-        monitoring_decision = delegation_result.decision
-
-        row["decision"] = monitoring_decision
+        row["decision"] = delegation_result.decision
         row["delegation_policy"] = delegation_result.policy_name
+        row["delegation_score"] = delegation_result.delegation_score
 
+        # ---------------------------------------------------------
+        # Record small-model result
+        # ---------------------------------------------------------
         small_prediction = row["cleaned_prediction"]
         references = row["references"]
 
@@ -103,26 +126,48 @@ def apply_cascade(
             references,
         )
 
-        # Default: keep the small-model answer.
+        # Preserve any large-model output that may already exist.
+        # CTD calibration generates these outputs before fitting.
+        existing_large_raw = row.get("large_raw_prediction")
+        existing_large_prediction = row.get("large_prediction")
+
+        # Default behaviour: keep the small-model answer.
         row["escalated"] = False
-        row["large_raw_prediction"] = None
-        row["large_prediction"] = None
-        row["large_exact_match"] = None
-        row["large_token_f1"] = None
         row["final_prediction"] = small_prediction
 
-        if delegation_result.should_escalate:
-            large_raw, large_cleaned = large_generator.generate(
-                question=example["question"],
-                contexts=row["retrieved_contexts"],
-                max_new_tokens=large_generation_config["max_new_tokens"],
-                temperature=large_generation_config["temperature"],
-            )
+        if not delegation_result.should_escalate:
+            # A CTD calibration row may contain a large answer even though
+            # the fitted policy chooses not to delegate. Retain it for
+            # analysis, but do not use it as the final prediction.
+            if existing_large_prediction is None:
+                row["large_raw_prediction"] = None
+                row["large_prediction"] = None
+                row["large_exact_match"] = None
+                row["large_token_f1"] = None
+
+        else:
+            # -----------------------------------------------------
+            # Obtain the large-model answer
+            # -----------------------------------------------------
+            if existing_large_prediction is not None:
+                # Reuse the output already generated during CTD calibration.
+                large_raw = existing_large_raw
+                large_cleaned = existing_large_prediction
+            else:
+                large_raw, large_cleaned = large_generator.generate(
+                    question=example["question"],
+                    contexts=row["retrieved_contexts"],
+                    max_new_tokens=large_generation_config[
+                        "max_new_tokens"
+                    ],
+                    temperature=large_generation_config[
+                        "temperature"
+                    ],
+                )
 
             row["escalated"] = True
             row["large_raw_prediction"] = large_raw
             row["large_prediction"] = large_cleaned
-
             row["large_exact_match"] = exact_match(
                 large_cleaned,
                 references,
@@ -131,9 +176,11 @@ def apply_cascade(
                 large_cleaned,
                 references,
             )
-
             row["final_prediction"] = large_cleaned
 
+        # ---------------------------------------------------------
+        # Evaluate the final cascade answer
+        # ---------------------------------------------------------
         row["final_exact_match"] = exact_match(
             row["final_prediction"],
             references,
@@ -240,6 +287,79 @@ def evaluate_examples(
 
     return rows
 
+def generate_large_calibration_outputs(
+    rows: list[dict],
+    examples: list[dict],
+    large_generator: AnswerGenerator,
+    large_generation_config: dict,
+) -> list[dict]:
+    """
+    Generate large-model outputs for every CTD calibration example.
+
+    CTD needs both small- and large-model outcomes to learn when
+    delegation is beneficial.
+    """
+
+    if len(rows) != len(examples):
+        raise ValueError(
+            "Rows and examples must have equal lengths."
+        )
+
+    for row, example in tqdm(
+        zip(rows, examples),
+        total=len(rows),
+        desc="Generating CTD calibration outputs",
+    ):
+        large_raw, large_cleaned = large_generator.generate(
+            question=example["question"],
+            contexts=row["retrieved_contexts"],
+            max_new_tokens=large_generation_config[
+                "max_new_tokens"
+            ],
+            temperature=large_generation_config[
+                "temperature"
+            ],
+        )
+
+        references = row["references"]
+
+        row["small_prediction"] = row["cleaned_prediction"]
+        row["small_exact_match"] = exact_match(
+            row["small_prediction"],
+            references,
+        )
+        row["small_token_f1"] = token_f1(
+            row["small_prediction"],
+            references,
+        )
+
+        row["large_raw_prediction"] = large_raw
+        row["large_prediction"] = large_cleaned
+        row["large_exact_match"] = exact_match(
+            large_cleaned,
+            references,
+        )
+        row["large_token_f1"] = token_f1(
+            large_cleaned,
+            references,
+        )
+
+        row["delegation_beneficial"] = (
+            row["small_exact_match"] == 0
+            and row["large_exact_match"] == 1
+        )
+
+        row["delegation_harmful"] = (
+            row["small_exact_match"] == 1
+            and row["large_exact_match"] == 0
+        )
+
+        row["delegation_em_gain"] = (
+            float(row["large_exact_match"])
+            - float(row["small_exact_match"])
+        )
+
+    return rows
 
 def aggregate_metrics(rows: list[dict]) -> dict:
     if not rows:
@@ -347,8 +467,8 @@ def aggregate_metrics(rows: list[dict]) -> dict:
 
             "usage": {
                 "small_model_calls": len(rows),
-                "large_model_calls": len(escalated),
-                "large_model_call_rate": len(escalated) / len(rows),
+                "inference_large_model_calls": len(escalated),
+                "inference_large_model_call_rate": len(escalated) / len(rows),
             },
 
             "final_em_gain_over_small": (
@@ -407,6 +527,27 @@ def main() -> None:
         config,
     )
 
+    policy_name = config["delegation"]["policy"]
+    ctd_policy = None
+
+    if policy_name == "ctd":
+        calibration_rows = (
+            generate_large_calibration_outputs(
+                rows=calibration_rows,
+                examples=calibration_examples,
+                large_generator=large_generator,
+                large_generation_config=large_model_config,
+            )
+        )
+
+        ctd_policy = fit_ctd_policy(
+            calibration_rows=calibration_rows,
+            target_delegation_rate=config[
+                "delegation"
+            ]["target_delegation_rate"],
+            seed=config["run"]["seed"],
+        )
+
     # Learn the thresholds from the small-model calibration results.
     thresholds = calibrate_thresholds(
         calibration_rows,
@@ -421,7 +562,8 @@ def main() -> None:
         large_generator=large_generator,
         large_generation_config=large_model_config,
         thresholds=thresholds,
-        policy_name=config["delegation"]["policy"],
+        policy_name=policy_name,
+        ctd_policy=ctd_policy,
     )
 
     test_rows = evaluate_examples(
@@ -438,7 +580,8 @@ def main() -> None:
         large_generator=large_generator,
         large_generation_config=large_model_config,
         thresholds=thresholds,
-        policy_name=config["delegation"]["policy"],
+        policy_name=policy_name,
+        ctd_policy=ctd_policy,
     )
 
     threshold_payload = thresholds.to_dict()
@@ -452,6 +595,29 @@ def main() -> None:
             "enabled_signals": config["monitoring"]["enabled_signals"],
             "score_weights": config["monitoring"]["score_weights"],
         },
+        "delegation_configuration": {
+        "policy": policy_name,
+        "target_delegation_rate": (
+            config["delegation"].get("target_delegation_rate")
+        ),
+        "ctd_threshold": (
+            ctd_policy.threshold
+            if ctd_policy is not None
+            else None
+        ),
+        "ctd_features": (
+            ctd_policy.feature_names
+            if ctd_policy is not None
+            else None
+        ),
+
+        # NEW
+        "ctd_calibration_large_model_calls": (
+            len(calibration_rows)
+            if policy_name == "ctd"
+            else 0
+        ),
+    },
         "calibration": aggregate_metrics(calibration_rows),
         "test": aggregate_metrics(test_rows),
         "calibration_status": threshold_payload,

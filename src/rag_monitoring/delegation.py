@@ -18,9 +18,17 @@ class DelegationResult:
 
 @dataclass
 class CTDPolicy:
+    """
+    Learned CTD-inspired delegation-value policy.
+
+    The model estimates whether replacing the small-model answer with
+    the large-model answer is likely to improve Exact Match.
+    """
+
     model: LogisticRegression
     threshold: float
     target_delegation_rate: float
+    feature_names: list[str]
 
     def score(self, features: list[float]) -> float:
         feature_array = np.asarray(
@@ -46,7 +54,6 @@ def threshold_delegation(
         decision=monitoring_decision,
         should_escalate=monitoring_decision == "escalate",
         policy_name="threshold_baseline",
-        delegation_score=None,
     )
 
 
@@ -60,25 +67,55 @@ def frugalgpt_delegation(
         decision="escalate" if should_escalate else "accept",
         should_escalate=should_escalate,
         policy_name="frugalgpt_style",
-        delegation_score=confidence,
+        delegation_score=float(confidence),
     )
+
+
+def ctd_features(row: dict) -> list[float]:
+    """
+    Features available before invoking the large model.
+    """
+
+    return [
+        float(row["retrieval_signal"]),
+        float(row["faithfulness_signal"]),
+        float(row["combined_confidence"]),
+    ]
 
 
 def fit_ctd_policy(
     calibration_rows: list[dict],
     target_delegation_rate: float,
+    seed: int = 42,
+    training_fraction: float = 0.70,
 ) -> CTDPolicy:
     """
-    Learn whether escalation is likely to improve Exact Match.
+    Fit a CTD-inspired delegation-value model.
 
-    This is a CTD-inspired adaptation, not a full reproduction of
-    the paper's latent-space delegation-value probe or formal
-    multiple-hypothesis-testing guarantee.
+    Calibration rows must already contain outputs from both models.
+
+    The rows are divided into:
+      1. probe-training rows for logistic regression;
+      2. threshold-calibration rows for choosing a delegation threshold.
+
+    This controls the delegation rate empirically; it does not provide
+    the formal guarantees from the original CTD paper.
     """
 
     if not 0.0 < target_delegation_rate <= 1.0:
         raise ValueError(
             "target_delegation_rate must be in (0, 1]."
+        )
+
+    if not 0.0 < training_fraction < 1.0:
+        raise ValueError(
+            "training_fraction must be between 0 and 1."
+        )
+
+    if len(calibration_rows) < 10:
+        raise ValueError(
+            "CTD requires at least 10 calibration examples. "
+            "Use 50 or more for a meaningful smoke test."
         )
 
     features: list[list[float]] = []
@@ -87,63 +124,96 @@ def fit_ctd_policy(
     for row in calibration_rows:
         if row.get("large_exact_match") is None:
             raise ValueError(
-                "CTD calibration requires large-model outputs "
-                "for every calibration example."
+                "Every CTD calibration row must contain a "
+                "large-model output and large_exact_match."
             )
 
-        features.append(
-            [
-                float(row["retrieval_signal"]),
-                float(row["faithfulness_signal"]),
-                float(row["combined_confidence"]),
-            ]
-        )
+        features.append(ctd_features(row))
 
         benefit = (
-            row["small_exact_match"] == 0
-            and row["large_exact_match"] == 1
+            float(row["large_exact_match"])
+            > float(row["small_exact_match"])
         )
         benefit_labels.append(int(benefit))
 
-    if len(set(benefit_labels)) < 2:
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(len(calibration_rows))
+
+    split_index = int(
+        len(calibration_rows) * training_fraction
+    )
+    split_index = min(
+        max(split_index, 1),
+        len(calibration_rows) - 1,
+    )
+
+    training_indices = indices[:split_index]
+    threshold_indices = indices[split_index:]
+
+    x = np.asarray(features, dtype=float)
+    y = np.asarray(benefit_labels, dtype=int)
+
+    x_train = x[training_indices]
+    y_train = y[training_indices]
+
+    if len(np.unique(y_train)) < 2:
         raise ValueError(
-            "CTD calibration requires both beneficial and "
-            "non-beneficial escalation examples."
+            "CTD probe-training data contains only one class. "
+            "Increase calibration_size or use another seed."
         )
 
     model = LogisticRegression(
         class_weight="balanced",
-        random_state=42,
+        random_state=seed,
         max_iter=1000,
     )
-    model.fit(features, benefit_labels)
+    model.fit(x_train, y_train)
 
-    scores = model.predict_proba(
-        np.asarray(features, dtype=float)
+    threshold_scores = model.predict_proba(
+        x[threshold_indices]
     )[:, 1]
 
-    # Select the threshold that delegates approximately the desired
-    # fraction of examples with the highest predicted benefit.
+    # Delegate approximately the requested fraction of examples
+    # with the highest predicted delegation benefit.
     quantile = 1.0 - target_delegation_rate
-    threshold = float(np.quantile(scores, quantile))
+    threshold = float(
+        np.quantile(
+            threshold_scores,
+            quantile,
+            method="higher",
+        )
+    )
 
     return CTDPolicy(
         model=model,
         threshold=threshold,
-        target_delegation_rate=target_delegation_rate,
+        target_delegation_rate=float(
+            target_delegation_rate
+        ),
+        feature_names=[
+            "retrieval_signal",
+            "faithfulness_signal",
+            "combined_confidence",
+        ],
     )
 
 
 def ctd_delegation(
-    features: list[float],
+    row: dict,
     policy: CTDPolicy,
 ) -> DelegationResult:
-    delegation_score = policy.score(features)
-    should_escalate = delegation_score >= policy.threshold
+    score = policy.score(
+        ctd_features(row)
+    )
+    should_escalate = score >= policy.threshold
 
     return DelegationResult(
-        decision="escalate" if should_escalate else "accept",
+        decision=(
+            "escalate"
+            if should_escalate
+            else "accept"
+        ),
         should_escalate=should_escalate,
         policy_name="ctd_style",
-        delegation_score=delegation_score,
+        delegation_score=score,
     )
