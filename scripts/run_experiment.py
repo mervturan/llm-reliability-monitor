@@ -49,6 +49,24 @@ def find_gold_context_rank(
             return rank
     return None
 
+def best_reference_semantic_similarity(
+    prediction: str,
+    references: list[str],
+    similarity_function,
+) -> float:
+    """
+    Compare a prediction with all acceptable reference answers
+    and return the highest semantic similarity.
+    """
+
+    if not references:
+        return 0.0
+
+    return max(
+        similarity_function(prediction, reference)
+        for reference in references
+    )
+
 def apply_cascade(
     rows: list[dict],
     examples: list[dict],
@@ -56,6 +74,7 @@ def apply_cascade(
     large_generation_config: dict,
     thresholds,
     policy_name: str,
+    similarity_function,
     ctd_policy: CTDPolicy | None = None,
 ) -> list[dict]:
     """
@@ -129,9 +148,9 @@ def apply_cascade(
             small_prediction,
             references,
         )
+        row["small_semantic_similarity"] = row["semantic_similarity"]
 
-        # Preserve any large-model output that may already exist.
-        # CTD calibration generates these outputs before fitting.
+        # CTD calibration may already contain a large-model output.
         existing_large_raw = row.get("large_raw_prediction")
         existing_large_prediction = row.get("large_prediction")
 
@@ -140,21 +159,28 @@ def apply_cascade(
         row["final_prediction"] = small_prediction
 
         if not delegation_result.should_escalate:
-            # A CTD calibration row may contain a large answer even though
-            # the fitted policy chooses not to delegate. Retain it for
-            # analysis, but do not use it as the final prediction.
+            # Keep any existing CTD calibration output for analysis,
+            # but do not use it as the final answer.
             if existing_large_prediction is None:
                 row["large_raw_prediction"] = None
                 row["large_prediction"] = None
                 row["large_exact_match"] = None
                 row["large_token_f1"] = None
+                row["large_semantic_similarity"] = None
+            else:
+                row["large_semantic_similarity"] = (
+                    best_reference_semantic_similarity(
+                        prediction=existing_large_prediction,
+                        references=references,
+                        similarity_function=similarity_function,
+                    )
+                )
 
         else:
             # -----------------------------------------------------
             # Obtain the large-model answer
             # -----------------------------------------------------
             if existing_large_prediction is not None:
-                # Reuse the output already generated during CTD calibration.
                 large_raw = existing_large_raw
                 large_cleaned = existing_large_prediction
             else:
@@ -180,6 +206,13 @@ def apply_cascade(
                 large_cleaned,
                 references,
             )
+            row["large_semantic_similarity"] = (
+                best_reference_semantic_similarity(
+                    prediction=large_cleaned,
+                    references=references,
+                    similarity_function=similarity_function,
+                )
+            )
             row["final_prediction"] = large_cleaned
 
         # ---------------------------------------------------------
@@ -192,6 +225,13 @@ def apply_cascade(
         row["final_token_f1"] = token_f1(
             row["final_prediction"],
             references,
+        )
+        row["final_semantic_similarity"] = (
+            best_reference_semantic_similarity(
+                prediction=row["final_prediction"],
+                references=references,
+                similarity_function=similarity_function,
+            )
         )
 
         row["escalation_improved"] = (
@@ -207,7 +247,6 @@ def apply_cascade(
         )
 
     return rows
-
 
 def evaluate_examples(
     examples: list[dict],
@@ -262,6 +301,11 @@ def evaluate_examples(
         signal_scores = monitoring_result.signal_scores()
         raw_signal_values = monitoring_result.raw_signal_values()
         references = example["answers"]["text"]
+        semantic_similarity = best_reference_semantic_similarity(
+            prediction=prediction,
+            references=references,
+            similarity_function=retriever.semantic_similarity,
+        )
 
         rows.append({
             "id": example["id"],
@@ -287,6 +331,7 @@ def evaluate_examples(
             "combined_confidence": monitoring_result.combined_confidence,
             "exact_match": exact_match(prediction, references),
             "token_f1": token_f1(prediction, references),
+            "semantic_similarity": semantic_similarity,
         })
 
     return rows
@@ -394,6 +439,12 @@ def aggregate_metrics(rows: list[dict]) -> dict:
         "n_examples": len(rows),
         "exact_match": float(np.mean([row["exact_match"] for row in rows])),
         "token_f1": float(np.mean([row["token_f1"] for row in rows])),
+        "semantic_similarity": float(
+                        np.mean([
+                            row["semantic_similarity"]
+                            for row in rows
+                        ])
+                    ),
         "mean_confidence": float(np.mean([row["combined_confidence"] for row in rows])),
         "retrieval": {
             "top_k": max(len(row["retrieved_contexts"]) for row in rows),
@@ -478,6 +529,39 @@ def aggregate_metrics(rows: list[dict]) -> dict:
             "final_em_gain_over_small": (
                 float(np.mean([row["final_exact_match"] for row in rows]))
                 - float(np.mean([row["small_exact_match"] for row in rows]))
+            ),
+            "small_model_semantic_similarity": float(
+                np.mean([
+                    row["small_semantic_similarity"]
+                    for row in rows
+                ])
+            ),
+
+            "large_semantic_similarity_on_escalated": (
+                float(np.mean([
+                    row["large_semantic_similarity"]
+                    for row in escalated
+                ]))
+                if escalated
+                else None
+            ),
+
+            "final_semantic_similarity": float(
+                np.mean([
+                    row["final_semantic_similarity"]
+                    for row in rows
+                ])
+            ),
+
+            "semantic_similarity_gain_over_small": (
+                float(np.mean([
+                    row["final_semantic_similarity"]
+                    for row in rows
+                ]))
+                - float(np.mean([
+                    row["small_semantic_similarity"]
+                    for row in rows
+                ]))
             ),
         },
         
@@ -567,6 +651,7 @@ def main() -> None:
         large_generation_config=large_model_config,
         thresholds=thresholds,
         policy_name=policy_name,
+        similarity_function=retriever.semantic_similarity,
         ctd_policy=ctd_policy,
     )
 
@@ -585,6 +670,7 @@ def main() -> None:
         large_generation_config=large_model_config,
         thresholds=thresholds,
         policy_name=policy_name,
+        similarity_function=retriever.semantic_similarity,
         ctd_policy=ctd_policy,
     )
 
