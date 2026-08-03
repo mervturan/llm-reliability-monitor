@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
+import time
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
@@ -154,13 +156,20 @@ def apply_cascade(
         existing_large_raw = row.get("large_raw_prediction")
         existing_large_prediction = row.get("large_prediction")
 
+        existing_large_generation_time = row.get(
+            "large_generation_time_seconds",
+            0.0,
+        )
+
         # Default behaviour: keep the small-model answer.
         row["escalated"] = False
         row["final_prediction"] = small_prediction
+        row["large_generation_time_seconds"] = 0.0
+
 
         if not delegation_result.should_escalate:
             # Keep any existing CTD calibration output for analysis,
-            # but do not use it as the final answer.
+            # but do not generate a new large-model answer.
             if existing_large_prediction is None:
                 row["large_raw_prediction"] = None
                 row["large_prediction"] = None
@@ -177,13 +186,13 @@ def apply_cascade(
                 )
 
         else:
-            # -----------------------------------------------------
-            # Obtain the large-model answer
-            # -----------------------------------------------------
+            # Obtain the large-model answer only when escalation is selected.
             if existing_large_prediction is not None:
                 large_raw = existing_large_raw
                 large_cleaned = existing_large_prediction
+                large_generation_time = existing_large_generation_time
             else:
+                large_generation_start = time.perf_counter()
                 large_raw, large_cleaned = large_generator.generate(
                     question=example["question"],
                     contexts=row["retrieved_contexts"],
@@ -195,9 +204,15 @@ def apply_cascade(
                     ],
                 )
 
+                large_generation_time = (
+                    time.perf_counter() - large_generation_start
+                )
+
             row["escalated"] = True
+            row["large_generation_time_seconds"] = large_generation_time
             row["large_raw_prediction"] = large_raw
             row["large_prediction"] = large_cleaned
+
             row["large_exact_match"] = exact_match(
                 large_cleaned,
                 references,
@@ -213,8 +228,10 @@ def apply_cascade(
                     similarity_function=similarity_function,
                 )
             )
+
             row["final_prediction"] = large_cleaned
 
+        
         # ---------------------------------------------------------
         # Evaluate the final cascade answer
         # ---------------------------------------------------------
@@ -232,6 +249,11 @@ def apply_cascade(
                 references=references,
                 similarity_function=similarity_function,
             )
+        )
+
+        row["final_generation_time_seconds"] = (
+            row["small_generation_time_seconds"]
+            + row["large_generation_time_seconds"]
         )
 
         row["escalation_improved"] = (
@@ -269,8 +291,14 @@ def evaluate_examples(
         raw_answers: list[str] = []
         cleaned_answers: list[str] = []
 
-        for sample_index in range(small_generation_config["num_consistency_samples"]):
+        # Measure all small-model generation used for this example.
+        small_generation_start = time.perf_counter()
+
+        for sample_index in range(
+            small_generation_config["num_consistency_samples"]
+        ):
             temperature = small_generation_config["temperature"]
+
             if sample_index > 0 and temperature == 0:
                 temperature = 0.7
 
@@ -280,14 +308,26 @@ def evaluate_examples(
                 max_new_tokens=small_generation_config["max_new_tokens"],
                 temperature=temperature,
             )
+
             raw_answers.append(raw_answer)
             cleaned_answers.append(cleaned_answer)
 
-        prediction = cleaned_answers[0]
-        gold_context_rank = find_gold_context_rank(
-            example["context"], retrieval_result.contexts
+        small_generation_time = (
+            time.perf_counter() - small_generation_start
         )
-        reciprocal_rank = 1.0 / gold_context_rank if gold_context_rank else 0.0
+
+        prediction = cleaned_answers[0]
+
+        gold_context_rank = find_gold_context_rank(
+            example["context"],
+            retrieval_result.contexts,
+        )
+
+        reciprocal_rank = (
+            1.0 / gold_context_rank
+            if gold_context_rank
+            else 0.0
+        )
 
         monitoring_result = monitor_answer(
             prediction=prediction,
@@ -298,9 +338,11 @@ def evaluate_examples(
             enabled_signals=monitoring_config["enabled_signals"],
             weights=monitoring_config["score_weights"],
         )
+
         signal_scores = monitoring_result.signal_scores()
         raw_signal_values = monitoring_result.raw_signal_values()
         references = example["answers"]["text"]
+
         semantic_similarity = best_reference_semantic_similarity(
             prediction=prediction,
             references=references,
@@ -328,10 +370,23 @@ def evaluate_examples(
             "retrieval_signal_raw": raw_signal_values["retrieval"],
             "faithfulness_signal_raw": raw_signal_values["faithfulness"],
             "consistency_signal_raw": raw_signal_values["consistency"],
-            "combined_confidence": monitoring_result.combined_confidence,
-            "exact_match": exact_match(prediction, references),
-            "token_f1": token_f1(prediction, references),
+            "combined_confidence": (
+                monitoring_result.combined_confidence
+            ),
+            "exact_match": exact_match(
+                prediction,
+                references,
+            ),
+            "token_f1": token_f1(
+                prediction,
+                references,
+            ),
             "semantic_similarity": semantic_similarity,
+
+            # New latency field
+            "small_generation_time_seconds": (
+                small_generation_time
+            ),
         })
 
     return rows
@@ -359,6 +414,7 @@ def generate_large_calibration_outputs(
         total=len(rows),
         desc="Generating CTD calibration outputs",
     ):
+        large_generation_start = time.perf_counter()
         large_raw, large_cleaned = large_generator.generate(
             question=example["question"],
             contexts=row["retrieved_contexts"],
@@ -368,6 +424,9 @@ def generate_large_calibration_outputs(
             temperature=large_generation_config[
                 "temperature"
             ],
+        )
+        row["large_generation_time_seconds"] = (
+            time.perf_counter() - large_generation_start
         )
 
         references = row["references"]
@@ -563,6 +622,43 @@ def aggregate_metrics(rows: list[dict]) -> dict:
                     for row in rows
                 ]))
             ),
+
+            "latency_seconds": {
+            "mean_small_generation_time": float(
+                np.mean([
+                    row["small_generation_time_seconds"]
+                    for row in rows
+                ])
+            ),
+            "mean_large_generation_time_on_escalated": (
+                float(
+                    np.mean([
+                        row["large_generation_time_seconds"]
+                        for row in escalated
+                    ])
+                )
+                if escalated
+                else None
+            ),
+            "mean_final_generation_time": float(
+                np.mean([
+                    row["final_generation_time_seconds"]
+                    for row in rows
+                ])
+            ),
+            "total_small_generation_time": float(
+                np.sum([
+                    row["small_generation_time_seconds"]
+                    for row in rows
+                ])
+            ),
+            "total_large_generation_time": float(
+                np.sum([
+                    row["large_generation_time_seconds"]
+                    for row in rows
+                ])
+            ),
+        },
         },
         
     }
