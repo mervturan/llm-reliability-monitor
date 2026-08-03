@@ -217,3 +217,11 @@ def ctd_delegation(
         policy_name="ctd_style",
         delegation_score=score,
     )
+
+def always_large_delegation() -> DelegationResult:
+    return DelegationResult(
+        decision="escalate",
+        should_escalate=True,
+        policy_name="always_large",
+    )
+

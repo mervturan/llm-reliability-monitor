@@ -32,6 +32,7 @@ from rag_monitoring.delegation import (
     fit_ctd_policy,
     frugalgpt_delegation,
     threshold_delegation,
+    always_large_delegation,
 )
 
 def normalize_context(text: str) -> str:
@@ -100,6 +101,9 @@ def apply_cascade(
                 row=row,
                 policy=ctd_policy,
             )
+
+        elif policy_name == "always_large":
+            delegation_result = always_large_delegation()
 
         else:
             raise ValueError(
