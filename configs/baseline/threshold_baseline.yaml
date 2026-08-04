@@ -1,12 +1,12 @@
 run:
-  name: squad_smoke
+  name: squad_v05_combined_500
   seed: 42
   output_root: outputs
 
 dataset:
-  calibration_size: 12
-  test_size: 12
-  context_pool_size: 80
+  calibration_size: 500
+  test_size: 500
+  context_pool_size: 2000
 
 retrieval:
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
@@ -19,11 +19,18 @@ generation:
   temperature: 0.0
   num_consistency_samples: 1
   device: auto
+  
+cost:
+  small_model_relative_cost: 1.0
+  large_model_relative_cost: 6.0
 
 monitoring:
+  enabled_signals:
+    - retrieval
+    - faithfulness
   target_risk: 0.20
   flag_margin: 0.08
   score_weights:
-    retrieval: 0.40
-    faithfulness: 0.45
-    consistency: 0.15
+    retrieval: 0.45
+    faithfulness: 0.55
+    consistency: 0.00

@@ -1,13 +1,12 @@
 run:
-  name: squad_frugalgpt_qwen05_to_qwen3_smoke
+  name: squad_frugalgpt_qwen05_to_qwen3_100
   seed: 42
   output_root: outputs
 
 dataset:
-  name: squad
-  calibration_size: 12
-  test_size: 12
-  context_pool_size: 80
+  calibration_size: 100
+  test_size: 100
+  context_pool_size: 500
 
 delegation:
   policy: frugalgpt
@@ -24,6 +23,10 @@ generation:
     temperature: 0.0
     num_consistency_samples: 1
     device: auto
+    
+cost:
+  small_model_relative_cost: 1.0
+  large_model_relative_cost: 6.0
 
   large_model:
     model_name: Qwen/Qwen2.5-3B-Instruct

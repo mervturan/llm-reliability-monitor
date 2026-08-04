@@ -1,10 +1,9 @@
 run:
-  name: squad_v05_faithfulness_only_smoke
+  name: squad_smoke
   seed: 42
   output_root: outputs
 
 dataset:
-  name: squad
   calibration_size: 12
   test_size: 12
   context_pool_size: 80
@@ -20,13 +19,15 @@ generation:
   temperature: 0.0
   num_consistency_samples: 1
   device: auto
+  
+cost:
+  small_model_relative_cost: 1.0
+  large_model_relative_cost: 6.0
 
 monitoring:
-  enabled_signals:
-    - faithfulness
   target_risk: 0.20
   flag_margin: 0.08
   score_weights:
-    retrieval: 0.00
-    faithfulness: 1.00
-    consistency: 0.00
+    retrieval: 0.40
+    faithfulness: 0.45
+    consistency: 0.15

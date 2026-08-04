@@ -469,7 +469,11 @@ def generate_large_calibration_outputs(
 
     return rows
 
-def aggregate_metrics(rows: list[dict]) -> dict:
+def aggregate_metrics(
+    rows: list[dict],
+    cost_config: dict,
+    policy_name: str,
+) -> dict:
     if not rows:
         return {}
 
@@ -481,6 +485,32 @@ def aggregate_metrics(rows: list[dict]) -> dict:
     row for row in rows
     if row.get("escalated", False)
     ]
+
+    small_unit_cost = float(
+        cost_config["small_model_relative_cost"]
+    )
+    large_unit_cost = float(
+        cost_config["large_model_relative_cost"]
+    )
+
+    # Estimated deployment calls:
+    # always-large would directly call only the large model,
+    # even though the current implementation also generates
+    # a small answer for experimental comparison.
+    if policy_name == "always_large":
+        estimated_small_calls = 0
+        estimated_large_calls = len(rows)
+    else:
+        estimated_small_calls = len(rows)
+        estimated_large_calls = len(escalated)
+
+    estimated_total_cost = (
+        estimated_small_calls * small_unit_cost
+        + estimated_large_calls * large_unit_cost
+    )
+
+    small_only_cost = len(rows) * small_unit_cost
+    always_large_cost = len(rows) * large_unit_cost
 
     improved = [
         row for row in escalated
@@ -583,6 +613,27 @@ def aggregate_metrics(rows: list[dict]) -> dict:
                 "small_model_calls": len(rows),
                 "inference_large_model_calls": len(escalated),
                 "inference_large_model_call_rate": len(escalated) / len(rows),
+            },
+            "estimated_cost": {
+                "cost_type": "relative_unit_cost",
+                "small_model_unit_cost": small_unit_cost,
+                "large_model_unit_cost": large_unit_cost,
+                "estimated_small_model_calls": estimated_small_calls,
+                "estimated_large_model_calls": estimated_large_calls,
+                "estimated_total_cost": estimated_total_cost,
+                "estimated_cost_per_example": (
+                    estimated_total_cost / len(rows)
+                ),
+                "relative_to_small_only": (
+                    estimated_total_cost / small_only_cost
+                    if small_only_cost > 0
+                    else None
+                ),
+                "relative_to_always_large": (
+                    estimated_total_cost / always_large_cost
+                    if always_large_cost > 0
+                    else None
+                ),
             },
 
             "final_em_gain_over_small": (
@@ -804,8 +855,16 @@ def main() -> None:
             else 0
         ),
     },
-        "calibration": aggregate_metrics(calibration_rows),
-        "test": aggregate_metrics(test_rows),
+        "calibration": aggregate_metrics(
+            rows=calibration_rows,
+            cost_config=config["cost"],
+            policy_name=policy_name,
+        ),
+        "test": aggregate_metrics(
+            rows=test_rows,
+            cost_config=config["cost"],
+            policy_name=policy_name,
+        ),
         "calibration_status": threshold_payload,
     }
 

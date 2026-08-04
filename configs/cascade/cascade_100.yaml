@@ -1,15 +1,13 @@
 run:
-  name: squad_frugalgpt_qwen05_to_qwen3_100
+  name: squad_cascade_qwen05_to_qwen3_100
   seed: 42
   output_root: outputs
 
 dataset:
+  name: squad
   calibration_size: 100
   test_size: 100
   context_pool_size: 500
-
-delegation:
-  policy: frugalgpt
 
 retrieval:
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
@@ -29,6 +27,11 @@ generation:
     max_new_tokens: 48
     temperature: 0.0
     device: auto
+
+  
+cost:
+  small_model_relative_cost: 1.0
+  large_model_relative_cost: 6.0
 
 monitoring:
   enabled_signals:

@@ -1,5 +1,5 @@
 run:
-  name: squad_smoke_v03
+  name: squad_smoke_v04_retrieval
   seed: 42
   output_root: outputs
 
@@ -20,6 +20,10 @@ generation:
   temperature: 0.0
   num_consistency_samples: 1
   device: auto
+
+cost:
+  small_model_relative_cost: 1.0
+  large_model_relative_cost: 6.0
 
 monitoring:
   target_risk: 0.20
