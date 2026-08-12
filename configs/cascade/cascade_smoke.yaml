@@ -4,10 +4,14 @@ run:
   output_root: outputs
 
 dataset:
+  name: squad
   calibration_size: 12
   test_size: 12
   context_pool_size: 80
-  
+
+delegation:
+  policy: threshold_baseline
+
 retrieval:
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
   top_k: 3
@@ -26,7 +30,7 @@ generation:
     max_new_tokens: 48
     temperature: 0.0
     device: auto
-     
+
 cost:
   small_model_relative_cost: 1.0
   large_model_relative_cost: 6.0

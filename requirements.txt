@@ -1,9 +1,12 @@
 datasets>=3.0
-sentence-transformers>=3.0
-transformers>=4.45
-torch>=2.2
 numpy>=1.26
 pandas>=2.2
 PyYAML>=6.0
-tqdm>=4.66
 pytest>=8.0
+sentence-transformers>=3.0
+torch>=2.2
+tqdm>=4.66
+transformers>=4.45
+accelerate>=0.34
+protobuf>=4.25
+sentencepiece>=0.2.0

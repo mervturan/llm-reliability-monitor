@@ -9,6 +9,9 @@ dataset:
   test_size: 100
   context_pool_size: 500
 
+delegation:
+  policy: threshold_baseline
+
 retrieval:
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
   top_k: 3
@@ -28,7 +31,6 @@ generation:
     temperature: 0.0
     device: auto
 
-  
 cost:
   small_model_relative_cost: 1.0
   large_model_relative_cost: 6.0

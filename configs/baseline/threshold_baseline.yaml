@@ -1,12 +1,16 @@
 run:
-  name: squad_v05_combined_500
+  name: squad_threshold_baseline_500
   seed: 42
   output_root: outputs
 
 dataset:
+  name: squad
   calibration_size: 500
   test_size: 500
   context_pool_size: 2000
+
+delegation:
+  policy: threshold_baseline
 
 retrieval:
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
@@ -14,12 +18,19 @@ retrieval:
   batch_size: 32
 
 generation:
-  model_name: Qwen/Qwen2.5-0.5B-Instruct
-  max_new_tokens: 48
-  temperature: 0.0
-  num_consistency_samples: 1
-  device: auto
-  
+  small_model:
+    model_name: Qwen/Qwen2.5-0.5B-Instruct
+    max_new_tokens: 48
+    temperature: 0.0
+    num_consistency_samples: 1
+    device: auto
+
+  large_model:
+    model_name: Qwen/Qwen2.5-3B-Instruct
+    max_new_tokens: 48
+    temperature: 0.0
+    device: auto
+
 cost:
   small_model_relative_cost: 1.0
   large_model_relative_cost: 6.0

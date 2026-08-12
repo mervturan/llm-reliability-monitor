@@ -24,25 +24,23 @@ generation:
     temperature: 0.0
     num_consistency_samples: 1
     device: auto
-  
+
+  large_model:
+    model_name: Qwen/Qwen2.5-3B-Instruct
+    max_new_tokens: 48
+    temperature: 0.0
+    device: auto
+
 cost:
   small_model_relative_cost: 1.0
   large_model_relative_cost: 6.0
-
-large_model:
-  model_name: Qwen/Qwen2.5-3B-Instruct
-  max_new_tokens: 48
-  temperature: 0.0
-  device: auto
 
 monitoring:
   enabled_signals:
     - retrieval
     - faithfulness
-
   target_risk: 0.20
   flag_margin: 0.08
-
   score_weights:
     retrieval: 0.45
     faithfulness: 0.55
