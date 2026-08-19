@@ -1,0 +1,49 @@
+run:
+  name: squad_ctd_qwen05_to_qwen3_500_d50
+  seed: 42
+  output_root: outputs
+
+delegation:
+  policy: ctd
+  target_delegation_rate: 0.50
+  
+
+dataset:
+  name: squad
+  calibration_size: 500
+  test_size: 500
+  context_pool_size: 2000
+    
+retrieval:
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  top_k: 3
+  batch_size: 32
+
+generation:
+  small_model:
+    model_name: Qwen/Qwen2.5-0.5B-Instruct
+    max_new_tokens: 48
+    temperature: 0.0
+    num_consistency_samples: 1
+    device: auto
+
+  large_model:
+    model_name: Qwen/Qwen2.5-3B-Instruct
+    max_new_tokens: 48
+    temperature: 0.0
+    device: auto
+  
+cost:
+  small_model_relative_cost: 1.0
+  large_model_relative_cost: 6.0
+
+monitoring:
+  enabled_signals:
+    - retrieval
+    - faithfulness
+  target_risk: 0.20
+  flag_margin: 0.08
+  score_weights:
+    retrieval: 0.45
+    faithfulness: 0.55
+    consistency: 0.00

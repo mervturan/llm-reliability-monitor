@@ -1,18 +1,19 @@
 run:
-  name: squad_ctd_qwen05_to_qwen3_100
+  name: squad_ctd_qwen05_to_qwen3_500_d25
   seed: 42
   output_root: outputs
 
-dataset:
-  name: squad
-  calibration_size: 100
-  test_size: 100
-  context_pool_size: 500
-
 delegation:
   policy: ctd
-  target_delegation_rate: 0.50
+  target_delegation_rate: 0.25
   
+
+dataset:
+  name: squad
+  calibration_size: 500
+  test_size: 500
+  context_pool_size: 2000
+    
 retrieval:
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
   top_k: 3
