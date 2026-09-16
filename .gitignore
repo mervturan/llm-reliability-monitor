@@ -36,7 +36,6 @@ logs/
 # Data/model outputs
 data/
 datasets/
-outputs/
 runs/
 checkpoints/
 models/

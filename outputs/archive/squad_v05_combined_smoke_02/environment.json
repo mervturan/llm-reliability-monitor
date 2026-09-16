@@ -1,0 +1,9 @@
+{
+  "python": "3.9.25 (main, Nov 10 2025, 00:00:00) \n[GCC 11.5.0 20240719 (Red Hat 11.5.0-11)]",
+  "platform": "Linux-5.14.0-611.55.1.el9_7.0.3.x86_64-x86_64-with-glibc2.34",
+  "torch": "2.8.0+cu128",
+  "cuda_available": true,
+  "cuda_device_count": 1,
+  "git_commit": null,
+  "slurm_job_id": null
+}

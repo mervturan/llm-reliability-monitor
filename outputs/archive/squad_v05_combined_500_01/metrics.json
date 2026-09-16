@@ -1,0 +1,69 @@
+{
+  "signal_configuration": {
+    "enabled_signals": [
+      "retrieval",
+      "faithfulness"
+    ],
+    "score_weights": {
+      "retrieval": 0.45,
+      "faithfulness": 0.55,
+      "consistency": 0.0
+    }
+  },
+  "calibration": {
+    "n_examples": 500,
+    "exact_match": 0.432,
+    "token_f1": 0.5433778483556163,
+    "mean_confidence": 0.7067435158921407,
+    "retrieval": {
+      "top_k": 3,
+      "recall_at_k": 0.91,
+      "mean_reciprocal_rank": 0.8443333333333334,
+      "mean_gold_rank_when_retrieved": 1.164835164835165
+    },
+    "generation_given_retrieval": {
+      "exact_match_when_gold_retrieved": 0.4747252747252747,
+      "exact_match_when_gold_not_retrieved": 0.0
+    },
+    "acceptance_rate": 0.0,
+    "selective_exact_match": null,
+    "selective_risk": null,
+    "decision_counts": {
+      "accept": 0,
+      "flag": 25,
+      "escalate": 475
+    }
+  },
+  "test": {
+    "n_examples": 500,
+    "exact_match": 0.404,
+    "token_f1": 0.5131876992893114,
+    "mean_confidence": 0.7076727684488986,
+    "retrieval": {
+      "top_k": 3,
+      "recall_at_k": 0.834,
+      "mean_reciprocal_rank": 0.7603333333333333,
+      "mean_gold_rank_when_retrieved": 1.2038369304556356
+    },
+    "generation_given_retrieval": {
+      "exact_match_when_gold_retrieved": 0.47961630695443647,
+      "exact_match_when_gold_not_retrieved": 0.024096385542168676
+    },
+    "acceptance_rate": 0.002,
+    "selective_exact_match": 0.0,
+    "selective_risk": 1.0,
+    "decision_counts": {
+      "accept": 1,
+      "flag": 39,
+      "escalate": 460
+    }
+  },
+  "calibration_status": {
+    "accept": 0.8713235750794412,
+    "flag": 0.7913235750794412,
+    "target_risk": 0.2,
+    "target_achieved": false,
+    "accepted_count_at_threshold": 0,
+    "empirical_risk_at_threshold": null
+  }
+}

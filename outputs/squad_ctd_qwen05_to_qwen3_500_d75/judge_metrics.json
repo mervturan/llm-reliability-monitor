@@ -1,0 +1,31 @@
+{
+  "judge_configuration": {
+    "judge_model": "mistralai/Mistral-7B-Instruct-v0.3",
+    "device": "auto",
+    "max_new_tokens": 160,
+    "source_predictions": "outputs/squad_ctd_qwen05_to_qwen3_500_d75/test_predictions.jsonl",
+    "evaluated_examples": 500,
+    "criteria": [
+      "faithfulness",
+      "answer_relevance"
+    ]
+  },
+  "small_prediction": {
+    "n_examples": 500,
+    "successful_judgements": 500,
+    "failed_judgements": 0,
+    "parse_success_rate": 1.0,
+    "mean_faithfulness": 4.262,
+    "mean_answer_relevance": 4.06
+  },
+  "final_prediction": {
+    "n_examples": 500,
+    "successful_judgements": 500,
+    "failed_judgements": 0,
+    "parse_success_rate": 1.0,
+    "mean_faithfulness": 4.264,
+    "mean_answer_relevance": 4.096
+  },
+  "judge_faithfulness_gain_over_small": 0.002000000000000668,
+  "judge_answer_relevance_gain_over_small": 0.036000000000000476
+}

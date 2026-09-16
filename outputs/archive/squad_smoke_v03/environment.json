@@ -1,0 +1,9 @@
+{
+  "python": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "torch": "2.9.1+cpu",
+  "cuda_available": false,
+  "cuda_device_count": 0,
+  "git_commit": "6c6f68dd3293057d20705bd924666efd66e6ce86",
+  "slurm_job_id": null
+}

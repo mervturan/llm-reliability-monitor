@@ -1,0 +1,30 @@
+{
+  "calibration": {
+    "n_examples": 12,
+    "exact_match": 0.6666666666666666,
+    "token_f1": 0.7425925925925926,
+    "mean_confidence": 0.6815501297047984,
+    "acceptance_rate": 0.0,
+    "selective_exact_match": null,
+    "selective_risk": null,
+    "decision_counts": {
+      "accept": 0,
+      "flag": 8,
+      "escalate": 4
+    }
+  },
+  "test": {
+    "n_examples": 12,
+    "exact_match": 0.5,
+    "token_f1": 0.5488782051282052,
+    "mean_confidence": 0.6686267791354719,
+    "acceptance_rate": 0.16666666666666666,
+    "selective_exact_match": 0.5,
+    "selective_risk": 0.5,
+    "decision_counts": {
+      "accept": 2,
+      "flag": 4,
+      "escalate": 6
+    }
+  }
+}

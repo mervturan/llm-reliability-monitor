@@ -1,0 +1,8 @@
+{
+  "accept": 0.7434359990060331,
+  "flag": 0.663435999006033,
+  "target_risk": 0.2,
+  "target_achieved": false,
+  "accepted_count_at_threshold": 0,
+  "empirical_risk_at_threshold": null
+}

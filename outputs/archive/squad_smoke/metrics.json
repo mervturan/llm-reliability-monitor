@@ -1,0 +1,28 @@
+{
+  "calibration": {
+    "n_examples": 12,
+    "exact_match": 0.0,
+    "token_f1": 0.08843420491438396,
+    "acceptance_rate": 0.0,
+    "selective_exact_match": null,
+    "selective_risk": null,
+    "decision_counts": {
+      "accept": 0,
+      "flag": 0,
+      "escalate": 12
+    }
+  },
+  "test": {
+    "n_examples": 12,
+    "exact_match": 0.0,
+    "token_f1": 0.07663820979383594,
+    "acceptance_rate": 0.0,
+    "selective_exact_match": null,
+    "selective_risk": null,
+    "decision_counts": {
+      "accept": 0,
+      "flag": 0,
+      "escalate": 12
+    }
+  }
+}

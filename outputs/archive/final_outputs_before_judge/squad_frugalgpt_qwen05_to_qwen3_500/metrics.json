@@ -1,0 +1,162 @@
+{
+  "model_configuration": {
+    "small_model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "large_model": "Qwen/Qwen2.5-3B-Instruct"
+  },
+  "signal_configuration": {
+    "enabled_signals": [
+      "retrieval",
+      "faithfulness"
+    ],
+    "score_weights": {
+      "retrieval": 0.45,
+      "faithfulness": 0.55,
+      "consistency": 0.0
+    }
+  },
+  "delegation_configuration": {
+    "policy": "frugalgpt",
+    "target_delegation_rate": null,
+    "ctd_threshold": null,
+    "ctd_features": null,
+    "ctd_calibration_large_model_calls": 0
+  },
+  "calibration": {
+    "n_examples": 500,
+    "exact_match": 0.432,
+    "token_f1": 0.5433778483556163,
+    "semantic_similarity": 0.7016080311443657,
+    "mean_confidence": 0.7067435158921407,
+    "retrieval": {
+      "top_k": 3,
+      "recall_at_k": 0.91,
+      "mean_reciprocal_rank": 0.8443333333333334,
+      "mean_gold_rank_when_retrieved": 1.164835164835165
+    },
+    "generation_given_retrieval": {
+      "exact_match_when_gold_retrieved": 0.4747252747252747,
+      "exact_match_when_gold_not_retrieved": 0.0
+    },
+    "acceptance_rate": 0.0,
+    "selective_exact_match": null,
+    "selective_risk": null,
+    "decision_counts": {
+      "accept": 0,
+      "flag": 0,
+      "escalate": 500
+    },
+    "cascade": {
+      "escalation_rate": 1.0,
+      "small_model_exact_match": 0.432,
+      "small_model_token_f1": 0.5433778483556163,
+      "large_exact_match_on_escalated": 0.536,
+      "large_token_f1_on_escalated": 0.6636729137499255,
+      "final_exact_match": 0.536,
+      "final_token_f1": 0.6636729137499255,
+      "improved_count": 85,
+      "harmed_count": 33,
+      "net_improvement_count": 52,
+      "usage": {
+        "small_model_calls": 500,
+        "inference_large_model_calls": 500,
+        "inference_large_model_call_rate": 1.0
+      },
+      "estimated_cost": {
+        "cost_type": "relative_unit_cost",
+        "small_model_unit_cost": 1.0,
+        "large_model_unit_cost": 6.0,
+        "estimated_small_model_calls": 500,
+        "estimated_large_model_calls": 500,
+        "estimated_total_cost": 3500.0,
+        "estimated_cost_per_example": 7.0,
+        "relative_to_small_only": 7.0,
+        "relative_to_always_large": 1.1666666666666667
+      },
+      "final_em_gain_over_small": 0.10400000000000004,
+      "small_model_semantic_similarity": 0.7016080311443657,
+      "large_semantic_similarity_on_escalated": 0.7630936503335833,
+      "final_semantic_similarity": 0.7630936503335833,
+      "semantic_similarity_gain_over_small": 0.06148561918921769,
+      "latency_seconds": {
+        "mean_small_generation_time": 0.05586942952149548,
+        "mean_large_generation_time_on_escalated": 0.09390797148505226,
+        "mean_final_generation_time": 0.14977740100654774,
+        "total_small_generation_time": 27.934714760747738,
+        "total_large_generation_time": 46.95398574252613
+      }
+    }
+  },
+  "test": {
+    "n_examples": 500,
+    "exact_match": 0.404,
+    "token_f1": 0.5131876992893114,
+    "semantic_similarity": 0.6730034028366209,
+    "mean_confidence": 0.7076727684488986,
+    "retrieval": {
+      "top_k": 3,
+      "recall_at_k": 0.834,
+      "mean_reciprocal_rank": 0.7603333333333333,
+      "mean_gold_rank_when_retrieved": 1.2038369304556356
+    },
+    "generation_given_retrieval": {
+      "exact_match_when_gold_retrieved": 0.47961630695443647,
+      "exact_match_when_gold_not_retrieved": 0.024096385542168676
+    },
+    "acceptance_rate": 0.002,
+    "selective_exact_match": 0.0,
+    "selective_risk": 1.0,
+    "decision_counts": {
+      "accept": 1,
+      "flag": 0,
+      "escalate": 499
+    },
+    "cascade": {
+      "escalation_rate": 0.998,
+      "small_model_exact_match": 0.404,
+      "small_model_token_f1": 0.5131876992893114,
+      "large_exact_match_on_escalated": 0.5350701402805611,
+      "large_token_f1_on_escalated": 0.6317601719494212,
+      "final_exact_match": 0.534,
+      "final_token_f1": 0.6312966516055224,
+      "improved_count": 97,
+      "harmed_count": 32,
+      "net_improvement_count": 65,
+      "usage": {
+        "small_model_calls": 500,
+        "inference_large_model_calls": 499,
+        "inference_large_model_call_rate": 0.998
+      },
+      "estimated_cost": {
+        "cost_type": "relative_unit_cost",
+        "small_model_unit_cost": 1.0,
+        "large_model_unit_cost": 6.0,
+        "estimated_small_model_calls": 500,
+        "estimated_large_model_calls": 499,
+        "estimated_total_cost": 3494.0,
+        "estimated_cost_per_example": 6.988,
+        "relative_to_small_only": 6.988,
+        "relative_to_always_large": 1.1646666666666667
+      },
+      "final_em_gain_over_small": 0.13,
+      "small_model_semantic_similarity": 0.6730034028366209,
+      "large_semantic_similarity_on_escalated": 0.7343629286428521,
+      "final_semantic_similarity": 0.7339431541729718,
+      "semantic_similarity_gain_over_small": 0.06093975133635099,
+      "latency_seconds": {
+        "mean_small_generation_time": 0.058116804053424856,
+        "mean_large_generation_time_on_escalated": 0.09797712313319241,
+        "mean_final_generation_time": 0.15589797294035088,
+        "total_small_generation_time": 29.05840202671243,
+        "total_large_generation_time": 48.89058444346301
+      }
+    }
+  },
+  "calibration_status": {
+    "accept": 0.8713235750794412,
+    "flag": 0.7913235750794412,
+    "target_risk": 0.2,
+    "target_achieved": false,
+    "accepted_count_at_threshold": 0,
+    "empirical_risk_at_threshold": null
+  }
+}
